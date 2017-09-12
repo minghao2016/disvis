@@ -15,7 +15,7 @@ package_data = {'disvis': [os.path.join('data', '*.npy'), 'kernels.cl']}
 ext_modules = [Extension("disvis._extensions",
                          [os.path.join("src", "_extensions.c")],
                          include_dirs=[numpy.get_include()],
-                         extra_compile_args=['-ffast-math'],
+                         extra_compile_args=['-std=c99'],
                          ),
                ]
 
