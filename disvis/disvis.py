@@ -223,7 +223,8 @@ def main():
             consistent_sets = [bin(x) for x in disvis._ais_calc._indices[mask]]
             for cset, sperm in izip(consistent_sets, cons_perm):
                 restraint_flags = ' '.join(list(('{:0>' + str(nrestraints) + 'd}').format(int(cset[2:])))[::-1])
-                f.write('{} {:.0f}\n'.format(restraint_flags, sperm))
+                if sperm != 0:
+                    f.write('{} {:.0f}\n'.format(restraint_flags, sperm))
                 # print restraint_flags, sperm
             f.write('#' * 30 + '\n')
 
@@ -237,7 +238,18 @@ def main():
     # Write out interaction analysis
     if options.interaction_analysis:
         ia = disvis._interaction_analyzer
-        for resi, n in zip(ia._ligand_residues, ia._ligand_interactions[-1]):
-            print resi, n
-        for resi, n in zip(ia._receptor_residues, ia._receptor_interactions[-1]):
-            print resi, n
+
+        receptor_interactions = (ia._receptor_interactions / disvis.consistent_complexes[1:].reshape(-1, 1)).T
+        fname = args.directory("receptor_interactions.txt")
+        with open(fname, 'w') as f:
+            line = '{} ' + ' '.join(['{:.3f}'] * (nrestraints - 1)) + '\n'
+            for resid, interactions in izip(ia._receptor_residues, receptor_interactions):
+                f.write(line.format(resid, *interactions))
+
+        ligand_interactions = (ia._ligand_interactions / disvis.consistent_complexes[1:].reshape(-1, 1)).T
+        fname = args.directory("ligand_interactions.txt")
+        with open(fname, 'w') as f:
+            line = '{} ' + ' '.join(['{:.3f}'] * (nrestraints - 1)) + '\n'
+            for resid, interactions in izip(ia._ligand_residues, ligand_interactions):
+                f.write(line.format(resid, *interactions))
+
