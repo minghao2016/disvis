@@ -30,8 +30,8 @@ class InteractionSpace(object):
         # Subtract/add a small amount to account for later FFT round-off errors
         # TODO test correct behaviour
         voxel_volume = self.rcore.voxelspacing ** 3
-        self._max_clash_grid = np.floor(self.max_clash / voxel_volume ** 3) + 0.1
-        self._min_inter_grid = np.ceil(self.min_inter / voxel_volume ** 3) - 0.1
+        self._max_clash_grid = np.floor(self.max_clash / voxel_volume) + 0.1
+        self._min_inter_grid = np.ceil(self.min_inter / voxel_volume) - 0.1
 
         # Allocate space for arrays
         # Real arrays
@@ -146,7 +146,8 @@ class RestraintSpace(object):
             value = 1 << n
             fill_restraint_space(
                 restraint.rselections, lcoor,
-                restraint.min, restraint.max, value, self.space.array)
+                restraint.min, restraint.max, value, self.space.array
+            )
 
 
 class AccessibleInteractionSpace(object):
@@ -209,7 +210,7 @@ class InteractionAnalyzer(object):
     def __init__(self, receptor, ligand, accessible_interaction_space,
                  atom_names=['CA'], interaction_radius=10):
 
-        if atom_names is not None:
+        if atom_names:
             self.ligand = ligand.select('name', atom_names)
             self.receptor = receptor.select('name', atom_names)
         else:
@@ -220,8 +221,10 @@ class InteractionAnalyzer(object):
         self._ligand_coor = np.ascontiguousarray(
             (self.ligand.coor - self.ligand.center) / self.ais.space.voxelspacing)
         self._ligand_coor_rot = np.zeros_like(self._ligand_coor)
-        self._receptor_coor = np.ascontiguousarray((self.receptor.coor -
-                                                    self.ais.space.origin) / self.ais.space.voxelspacing)
+        self._receptor_coor = np.ascontiguousarray(
+            (self.receptor.coor - self.ais.space.origin) / self.ais.space.voxelspacing
+        )
+
         # Create distance restraints between each each residue of the ligand
         # and all of the receptor and each residue of the receptor with all of
         # the ligand. The distance restraints need to have views on the ligand
@@ -229,58 +232,61 @@ class InteractionAnalyzer(object):
         self._restraints_ligand = []
         self._restraints_receptor = []
         # Build up the restraints for each ligand residue
-        residue_ids = ['-'.join([c, str(resi)]) for c, resi in 
-                itertools.izip(self.ligand.data['chain'], self.ligand.data['resi'])]
+        residue_ids = ['-'.join([c, str(resi)]) for c, resi in
+                       itertools.izip(self.ligand.data['chain'], self.ligand.data['resi'])]
         unique_residues, unique_indices = np.unique(residue_ids, return_index=True)
         unique_indices = unique_indices.tolist() + [None]
-        self._ligand_interactions = np.zeros((self.ais.nrestraints, unique_residues.size), 
+        self._ligand_interactions = np.zeros((self.ais.nrestraints, unique_residues.size),
                                              dtype=np.float32)
         self._ligand_residues = unique_residues
-        self._ligand_counter = np.zeros(self.ais.nrestraints, dtype=np.int32)
         max_dis = interaction_radius / self.ais.space.voxelspacing
         for start, end in itertools.izip(unique_indices[:-1], unique_indices[1:]):
             coor = self._ligand_coor_rot[start:end]
             restraint = Restraint(self._receptor_coor, coor, 0, max_dis)
             self._restraints_ligand.append(restraint)
         # Build up the restraints for each receptor residue
-        residue_ids = ['-'.join([c, str(resi)]) for c, resi in 
-                itertools.izip(self.receptor.data['chain'], self.receptor.data['resi'])]
+        residue_ids = ['-'.join([c, str(resi)]) for c, resi in
+                       itertools.izip(self.receptor.data['chain'], self.receptor.data['resi'])]
         unique_residues, unique_indices = np.unique(residue_ids, return_index=True)
         unique_indices = unique_indices.tolist() + [None]
         self._receptor_residues = unique_residues
-        self._receptor_interactions = np.zeros((self.ais.nrestraints, unique_residues.size), 
+        self._receptor_interactions = np.zeros((self.ais.nrestraints, unique_residues.size),
                                                dtype=np.float32)
-        self._receptor_counter = np.zeros(self.ais.nrestraints, dtype=np.int32)
         for start, end in itertools.izip(unique_indices[:-1], unique_indices[1:]):
             coor = self._receptor_coor[start:end]
             restraint = Restraint(coor, self._ligand_coor_rot, 0, max_dis)
             self._restraints_receptor.append(restraint)
+        self._counter = np.zeros(self.ais.nrestraints, dtype=np.int32)
 
     def __call__(self, rotmat, weight=1):
         # Rotate all atoms and thus views of the ligand's coordinates
         np.dot(self._ligand_coor, rotmat.T, out=self._ligand_coor_rot)
         for n, restraint in enumerate(self._restraints_ligand):
-            count_interactions(restraint.rselections, restraint.lselections,
-                    restraint.min, restraint.max,
-                    self.ais.consistent_space.array, self._ligand_counter)
-            self._ligand_interactions[:,n] += self._ligand_counter * weight
-            self._ligand_counter.fill(0)
+            count_interactions(
+                restraint.rselections, restraint.lselections,
+                restraint.min, restraint.max,
+                self.ais.consistent_space.array, self._counter
+            )
+            self._ligand_interactions[:, n] += self._counter * weight
+            self._counter.fill(0)
 
         for n, restraint in enumerate(self._restraints_receptor):
-            count_interactions(restraint.rselections, restraint.lselections,
-                    restraint.min, restraint.max,
-                    self.ais.consistent_space.array, self._receptor_counter)
-            self._receptor_interactions[:,n] += self._receptor_counter * weight
-            self._receptor_counter.fill(0)
+            count_interactions(
+                restraint.rselections, restraint.lselections,
+                restraint.min, restraint.max,
+                self.ais.consistent_space.array, self._counter
+            )
+            self._receptor_interactions[:, n] += self._counter * weight
+            self._counter.fill(0)
 
 
 class OccupancySpace(object):
-    def __init__(self, interaction_space, accessible_interaction_space, nconsistent=None):
-        self.interaction_space = interaction_space
-        self.accessible_interaction_space = accessible_interaction_space
+    def __init__(self, accessible_interaction_space, nconsistent=None):
+        self.ais = accessible_interaction_space
+        self.interaction_space = self.ais.interaction_space
         self.nconsistent = nconsistent
         if self.nconsistent is None:
-            nrestraints = self.accessible_interaction_space.nrestraints
+            nrestraints = self.ais.nrestraints
             minconsistent = max(1, nrestraints - 2)
             self.nconsistent = range(minconsistent, nrestraints + 1)
         if PYFFTW:
@@ -289,8 +295,8 @@ class OccupancySpace(object):
         else:
             self._consistent = np.zeros(
                 self.interaction_space.space.array.shape, dtype=np.float64)
-        self._tmp = interaction_space._tmp
-        self._ft_tmp = interaction_space._ft_tmp
+        self._tmp = self.interaction_space._tmp
+        self._ft_tmp = self.interaction_space._ft_tmp
         self._rfftn = self.interaction_space._rfftn
         self._irfftn = self.interaction_space._irfftn
         self.spaces = []
@@ -301,8 +307,9 @@ class OccupancySpace(object):
 
     def __call__(self, weight=1):
         for n, space in itertools.izip(self.nconsistent, self.spaces):
-            np.greater_equal(self.accessible_interaction_space.consistent_space.array,
-                             n, out=self._consistent)
+            np.greater_equal(
+                self.ais.consistent_space.array, n, out=self._consistent
+            )
             self._rfftn(self._consistent, self._ft_tmp)
             self._ft_tmp *= self.interaction_space._ft_lcore
             self._irfftn(self._ft_tmp, self._tmp)

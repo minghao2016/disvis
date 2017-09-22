@@ -104,8 +104,7 @@ class DisVis(object):
             self._restraint_space_calc
         )
         if self.options.occupancy_analysis:
-            self._occupancy_space = OccupancySpace(
-                self._interaction_space_calc, self._ais_calc)
+            self._occupancy_space = OccupancySpace(self._ais_calc)
 
         if self.options.interaction_analysis:
             self._interaction_analyzer = InteractionAnalyzer(
