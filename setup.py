@@ -10,7 +10,7 @@ from setuptools.extension import Extension
 import numpy
 
 packages = ['disvis', 'disvis.IO']
-package_data = {'disvis': [os.path.join('data', '*.npy'), 'kernels.cl']}
+package_data = {'disvis': [os.path.join('data', '*.npy')]}
 
 ext_modules = [Extension("disvis._extensions",
                          [os.path.join("src", "_extensions.c")],
@@ -21,7 +21,7 @@ ext_modules = [Extension("disvis._extensions",
 
 entry_points = {
     'console_scripts': [
-        'disvis3 = disvis.disvis2:main',
+        'disvis = disvis.disvis:main',
     ]
 }
 requirements = ["numpy", "pyparsing"]
