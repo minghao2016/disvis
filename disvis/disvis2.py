@@ -11,7 +11,7 @@ import numpy as np
 from .pdb import PDB
 from .volume import Volume, Volumizer
 from .spaces import (InteractionSpace, RestraintSpace, Restraint,
-                     AccessibleInteractionSpace, OccupancySpace)
+                     AccessibleInteractionSpace, OccupancySpace, InteractionAnalyzer)
 from .helpers import RestraintParser, DJoiner
 from .rotations import proportional_orientations, quat_to_rotmat
 
@@ -106,6 +106,11 @@ class DisVis(object):
         if self.options.occupancy_analysis:
             self._occupancy_space = OccupancySpace(
                 self._interaction_space_calc, self._ais_calc)
+
+        if self.options.interaction_analysis:
+            self._interaction_analyzer = InteractionAnalyzer(
+                    self.receptor, self.ligand, self._ais_calc,
+            )
         self._initialized = True
 
     def __call__(self, rotmat, weight=1):
@@ -124,6 +129,8 @@ class DisVis(object):
 
         if self.options.occupancy_analysis:
             self._occupancy_space(weight=weight)
+        if self.options.interaction_analysis:
+            self._interaction_analyzer(rotmat, weight=weight)
 
     @property
     def consistent_complexes(self):
@@ -184,12 +191,13 @@ def main():
 
     quat, weights, alpha = proportional_orientations(args.angle)
     rotations = quat_to_rotmat(quat)
+    nrot = rotations.shape[0]
     disvis = DisVis(receptor, ligand, restraints, options)
     time0 = time.time()
     logger.info("Starting search.")
     for n, (rotmat, weight) in enumerate(izip(rotations, weights)):
         if args.verbose:
-            sys.stdout.write('{:>6d}\r'.format(n))
+            sys.stdout.write('{:>6d} {:>6d}\r'.format(n, nrot))
             sys.stdout.flush()
         disvis(rotmat, weight=weight)
     logger.info('Time: {:.2f} s'.format(time.time() - time0))
@@ -225,3 +233,11 @@ def main():
                         disvis._occupancy_space.spaces)
         for n, space in iterator:
             space.tofile(args.directory('occ_{:}.mrc'.format(n)))
+
+    # Write out interaction analysis
+    if options.interaction_analysis:
+        ia = disvis._interaction_analyzer
+        for resi, n in zip(ia._ligand_residues, ia._ligand_interactions[-1]):
+            print resi, n
+        for resi, n in zip(ia._receptor_residues, ia._receptor_interactions[-1]):
+            print resi, n

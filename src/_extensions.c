@@ -17,7 +17,7 @@ static int modulo(npy_intp x, npy_intp N)
 
 
 static void dilate_points(
-    PyArrayObject *pypoints, PyArrayObject *pyradii, double value, 
+    PyArrayObject *pypoints, PyArrayObject *pyradii, double value,
     PyArrayObject *pyout)
 {
   double *points = (double *) PyArray_DATA(pypoints);
@@ -65,19 +65,19 @@ static PyObject *py_dilate_points(PyObject *dummy, PyObject *args)
   PyObject *pypoints_arg=NULL, *pyradii_arg=NULL, *pyout_arg=NULL;
   PyArrayObject *pypoints=NULL, *pyradii=NULL, *pyout=NULL;
   double value;
-  if (!PyArg_ParseTuple(args, "OOdO", &pypoints_arg, &pyradii_arg, 
-                        &value, &pyout_arg)) 
+  if (!PyArg_ParseTuple(args, "OOdO", &pypoints_arg, &pyradii_arg,
+                        &value, &pyout_arg))
     return NULL;
 
-  pypoints = (PyArrayObject *) 
+  pypoints = (PyArrayObject *)
       PyArray_FROM_OTF(pypoints_arg, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (pypoints == NULL)
     goto fail;
-  pyradii = (PyArrayObject *) 
+  pyradii = (PyArrayObject *)
       PyArray_FROM_OTF(pyradii_arg, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (pyradii == NULL)
     goto fail;
-  pyout = (PyArrayObject *) 
+  pyout = (PyArrayObject *)
       PyArray_FROM_OTF(pyout_arg, NPY_FLOAT64, NPY_ARRAY_INOUT_ARRAY);
   if (pyout == NULL)
     goto fail;
@@ -99,7 +99,7 @@ fail:
 
 
 static void fill_restraint_space(
-    PyArrayObject *py_rsel, PyArrayObject *py_lsel, 
+    PyArrayObject *py_rsel, PyArrayObject *py_lsel,
     double min_dis, double max_dis, int value,
     PyArrayObject *py_out
     )
@@ -149,29 +149,29 @@ static void fill_restraint_space(
 static PyObject *py_fill_restraint_space(PyObject *dummy, PyObject *args)
 {
    // Parse arguments
-  PyObject 
+  PyObject
       *arg1=NULL, *arg2=NULL, *arg6=NULL;
-  PyArrayObject 
+  PyArrayObject
       *py_rsel=NULL, *py_lsel=NULL, *py_out=NULL;
-  double 
+  double
       min_dis, max_dis;
   int value;
 
-  if (!PyArg_ParseTuple(args, "OOddiO", &arg1, &arg2, &min_dis, 
+  if (!PyArg_ParseTuple(args, "OOddiO", &arg1, &arg2, &min_dis,
                         &max_dis, &value, &arg6))
     return NULL;
 
-  py_rsel = (PyArrayObject *) 
+  py_rsel = (PyArrayObject *)
       PyArray_FROM_OTF(arg1, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (py_rsel == NULL)
     goto fail;
 
-  py_lsel = (PyArrayObject *) 
+  py_lsel = (PyArrayObject *)
       PyArray_FROM_OTF(arg2, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (py_lsel == NULL)
     goto fail;
 
-  py_out = (PyArrayObject *) 
+  py_out = (PyArrayObject *)
       PyArray_FROM_OTF(arg6, NPY_INT32, NPY_ARRAY_INOUT_ARRAY);
   if (py_out == NULL)
     goto fail;
@@ -195,7 +195,7 @@ fail:
 
 
 static void fill_restraint_space_add(
-    PyArrayObject *py_rsel, PyArrayObject *py_lsel, 
+    PyArrayObject *py_rsel, PyArrayObject *py_lsel,
     double min_dis, double max_dis,
     PyArrayObject *py_out
     )
@@ -245,28 +245,28 @@ static void fill_restraint_space_add(
 static PyObject *py_fill_restraint_space_add(PyObject *dummy, PyObject *args)
 {
    // Parse arguments
-  PyObject 
+  PyObject
       *arg1=NULL, *arg2=NULL, *arg6=NULL;
-  PyArrayObject 
+  PyArrayObject
       *py_rsel=NULL, *py_lsel=NULL, *py_out=NULL;
-  double 
+  double
       min_dis, max_dis;
 
-  if (!PyArg_ParseTuple(args, "OOddO", &arg1, &arg2, &min_dis, 
+  if (!PyArg_ParseTuple(args, "OOddO", &arg1, &arg2, &min_dis,
                         &max_dis, &arg6))
     return NULL;
 
-  py_rsel = (PyArrayObject *) 
+  py_rsel = (PyArrayObject *)
       PyArray_FROM_OTF(arg1, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (py_rsel == NULL)
     goto fail;
 
-  py_lsel = (PyArrayObject *) 
+  py_lsel = (PyArrayObject *)
       PyArray_FROM_OTF(arg2, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
   if (py_lsel == NULL)
     goto fail;
 
-  py_out = (PyArrayObject *) 
+  py_out = (PyArrayObject *)
       PyArray_FROM_OTF(arg6, NPY_INT32, NPY_ARRAY_INOUT_ARRAY);
   if (py_out == NULL)
     goto fail;
@@ -289,10 +289,120 @@ fail:
 }
 
 
+static void count_interactions(
+    PyArrayObject *py_rsel, PyArrayObject *py_lsel,
+    double min_dis, double max_dis, PyArrayObject *py_consistent_space,
+    PyArrayObject *py_out
+    )
+{
+  npy_double *rsel = (npy_double *) PyArray_DATA(py_rsel);
+  npy_double *lsel = (npy_double *) PyArray_DATA(py_lsel);
+  npy_int *cons = (npy_int *) PyArray_DATA(py_consistent_space);
+  npy_int *out = (npy_int *) PyArray_DATA(py_out);
+
+  npy_intp *rsel_shape = PyArray_DIMS(py_rsel);
+  npy_intp *lsel_shape = PyArray_DIMS(py_lsel);
+  npy_intp *cons_shape = PyArray_DIMS(py_consistent_space);
+  npy_intp cons_slice = cons_shape[2] * cons_shape[1];
+
+  double max_dis2 = SQUARE(max_dis);
+  double min_dis2 = SQUARE(min_dis);
+
+  for (npy_intp nr = 0; nr < rsel_shape[0]; ++nr) {
+    for (npy_intp nl = 0; nl < lsel_shape[0]; ++nl) {
+      npy_double center_x = rsel[3 * nr] - lsel[3 * nl];
+      npy_double center_y = rsel[3 * nr + 1] - lsel[3 * nl + 1];
+      npy_double center_z = rsel[3 * nr + 2] - lsel[3 * nl + 2];
+
+      int zmin = MAX((int) ceil(center_z - max_dis), 0);
+      int ymin = MAX((int) ceil(center_y - max_dis), 0);
+      int xmin = MAX((int) ceil(center_x - max_dis), 0);
+      int zmax = MIN((int) floor(center_z + max_dis), cons_shape[0] - 1);
+      int ymax = MIN((int) floor(center_y + max_dis), cons_shape[1] - 1);
+      int xmax = MIN((int) floor(center_x + max_dis), cons_shape[2] - 1);
+
+      for (npy_intp z = zmin; z <= zmax; z++) {
+        double dist2_z = SQUARE(z - center_z);
+        npy_intp ind_z = z * cons_slice;
+        for (npy_intp y = ymin; y <= ymax; y++) {
+          double dist2_zy = SQUARE(y - center_y) + dist2_z;
+          npy_intp ind_zy = y * cons_shape[2] + ind_z;
+          for (npy_intp x = xmin; x <= xmax; x++) {
+            double dist2_zyx = SQUARE(x - center_x) + dist2_zy;
+            if ((dist2_zyx <= max_dis2) && (dist2_zyx >= min_dis2)) {
+              npy_intp nconsistent = cons[ind_zy + x];
+              if (nconsistent > 0) {
+                  out[nconsistent - 1] += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+static PyObject *py_count_interactions(PyObject *dummy, PyObject *args)
+{
+   // Parse arguments
+  PyObject
+      *arg1=NULL, *arg2=NULL, *py_consistent_space_arg=NULL, *arg6=NULL;
+  PyArrayObject
+      *py_rsel=NULL, *py_lsel=NULL, *py_consistent_space=NULL, *py_out=NULL;
+  double
+      min_dis, max_dis;
+
+  if (!PyArg_ParseTuple(args, "OOddOO", &arg1, &arg2, &min_dis,
+                        &max_dis, &py_consistent_space_arg, &arg6))
+    return NULL;
+
+  py_rsel = (PyArrayObject *)
+      PyArray_FROM_OTF(arg1, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
+  if (py_rsel == NULL)
+    goto fail;
+
+  py_lsel = (PyArrayObject *)
+      PyArray_FROM_OTF(arg2, NPY_FLOAT64, NPY_ARRAY_IN_ARRAY);
+  if (py_lsel == NULL)
+    goto fail;
+
+  py_consistent_space = (PyArrayObject *)
+      PyArray_FROM_OTF(py_consistent_space_arg, NPY_INT32, NPY_ARRAY_IN_ARRAY);
+  if (py_consistent_space == NULL)
+      goto fail;
+
+  py_out = (PyArrayObject *)
+      PyArray_FROM_OTF(arg6, NPY_INT32, NPY_ARRAY_INOUT_ARRAY);
+  if (py_out == NULL)
+    goto fail;
+
+  count_interactions(py_rsel, py_lsel, min_dis, max_dis, py_consistent_space, py_out);
+
+  // Clean up objects
+  Py_DECREF(py_rsel);
+  Py_DECREF(py_lsel);
+  Py_DECREF(py_consistent_space);
+  Py_DECREF(py_out);
+  Py_INCREF(Py_None);
+  return Py_None;
+
+fail:
+  // Clean up objects
+  Py_XDECREF(py_rsel);
+  Py_XDECREF(py_lsel);
+  Py_XDECREF(py_consistent_space);
+  PyArray_XDECREF_ERR(py_out);
+  return NULL;
+}
+
+
 static PyMethodDef mymethods[] = {
   {"dilate_points", py_dilate_points, METH_VARARGS, ""},
   {"fill_restraint_space", py_fill_restraint_space, METH_VARARGS, ""},
   {"fill_restraint_space_add", py_fill_restraint_space_add, METH_VARARGS, ""},
+  {"count_interactions", py_count_interactions, METH_VARARGS,
+      "Count interactions of each residue."},
   {NULL, NULL, 0, NULL}
 };
 
