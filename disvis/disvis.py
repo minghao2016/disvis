@@ -83,14 +83,13 @@ class DisVisOptions(object):
 
 
 class DisVis(object):
-    def __init__(self, receptor, ligand, restraints, options, counter=None):
+    def __init__(self, receptor, ligand, restraints, options):
         self.receptor = receptor
         self.ligand = ligand
         self.restraints = restraints
         self.options = options
         self._initialized = False
         self._n = 0
-        self._counter = counter
 
     def initialize(self):
 
@@ -125,9 +124,9 @@ class DisVis(object):
             space = Volume.zeros_like(rcore)
             identifyer = InterfaceResidueIdentifyer(space)
             pruned_receptor = identifyer(self.receptor)
-            pruned_receptor.tofile('pruned_receptor.pdb')
+            #pruned_receptor.tofile('pruned_receptor.pdb')
             pruned_ligand = identifyer(self.ligand)
-            pruned_ligand.tofile('pruned_ligand.pdb')
+            #pruned_ligand.tofile('pruned_ligand.pdb')
             self._interaction_analyzer = InteractionAnalyzer(
                 pruned_receptor, pruned_ligand, self._ais_calc,
             )
@@ -145,7 +144,7 @@ class DisVis(object):
         if self.options.save:
             save_id = self.options.save_id
             fname = self.options.directory(
-                'ais{}_{:d}.mrc'.format(save_id, self.self._n)
+                'ais_{}_{:d}.mrc'.format(save_id, self._n)
             )
             self._ais_calc.consistent_space.tofile(fname)
             self._n += 1
@@ -154,11 +153,6 @@ class DisVis(object):
             self._occupancy_space(weight=weight)
         if self.options.interaction_analysis:
             self._interaction_analyzer(rotmat, weight=weight)
-
-        try:
-            self._counter.increment()
-        except AttributeError:
-            pass
 
     @property
     def consistent_complexes(self):
@@ -216,6 +210,8 @@ class DisVis(object):
             iterator = izip(occs.nconsistent, occs.spaces)
             for n, space in iterator:
                 fname = directory(prefix + 'occ_{:}' + suffix + '.mrc')
+                if normalize:
+                    space.array /= self.consistent_complexes[int(n)]
                 space.tofile(directory(fname.format(n)))
 
         # Write out interaction analysis
@@ -270,10 +266,11 @@ class MPDisVis(object):
     def _run_disvis_instance(receptor, ligand, restraints, options, rotmats, weights,
                              counter, job_id):
         options.save_id = job_id
-        disvis = DisVis(receptor, ligand, restraints, options, counter=counter)
+        disvis = DisVis(receptor, ligand, restraints, options)
         # Loop over rotations and weights
         for w, rotmat in izip(weights, rotmats):
             disvis(rotmat, weight=w)
+            counter.increment()
         # Write results to file
         suffix = '_{}'.format(job_id)
         disvis.tofile(normalize=False, prefix='_', suffix=suffix)
@@ -287,6 +284,7 @@ class MPDisVis(object):
         self.restraint_correlations = OrderedDict()
         self.consistent_complexes = np.zeros(nrestraints + 1)
         self.violation_matrix = np.zeros((nrestraints + 1, nrestraints))
+        self.occupancy_spaces = {}
         for n in xrange(self.options.nprocessors):
             fname = directory('_consistent_complexes_{}.txt'.format(n))
             self.consistent_complexes += np.loadtxt(fname, usecols=1)
@@ -297,8 +295,9 @@ class MPDisVis(object):
             fname = directory('_consistent_space_{}.mrc'.format(n))
             max_consistent = Volume.fromfile(fname)
             try:
-                np.maximum(self.max_consistent, max_consistent, self.max_consistent)
-            except:
+                np.maximum(self.max_consistent.array, max_consistent.array,
+                           self.max_consistent.array)
+            except AttributeError:
                 self.max_consistent = max_consistent
 
             fname = directory("_restraint_correlations_{}.txt".format(n))
@@ -315,14 +314,13 @@ class MPDisVis(object):
                         self.restraint_correlations[key] = value
 
             if self.options.occupancy_analysis:
-                self.occupancy_spaces = {}
                 fnames = glob(directory('_occ_*_{}.mrc').format(n))
                 for fname in fnames:
                     _, _, nconsistent, job_id = os.path.split(fname)[1].split('_')
                     occ_space = Volume.fromfile(fname)
                     try:
-                        self.occupancy_spaces[nconsistent].array += occ_space
-                    except:
+                        self.occupancy_spaces[nconsistent].array += occ_space.array
+                    except KeyError:
                         self.occupancy_spaces[nconsistent] = occ_space
 
             if self.options.interaction_analysis:
@@ -332,7 +330,7 @@ class MPDisVis(object):
                 interactions = data[:, 1:].astype(np.float64)
                 try:
                     self.receptor_interactions += interactions
-                except:
+                except AttributeError:
                     self.receptor_interactions = interactions
                 fname = directory('_ligand_interactions_{}.txt'.format(n))
                 data = np.loadtxt(fname, dtype=np.str_)
@@ -369,7 +367,7 @@ class MPDisVis(object):
             p.start()
 
         # Report on progress
-        if self.options.verbose:
+        if self.options.verbose and sys.stdout.isatty():
             line = '{n} / {total}  time passed: {passed:.0f}s  eta: {eta:.0f}s       \r'
             while True:
                 n = counter.value()
@@ -415,6 +413,7 @@ class MPDisVis(object):
         if self.options.occupancy_analysis:
             for n, space in self.occupancy_spaces.iteritems():
                 fname = directory('occ_{:}.mrc')
+                space.array /= self.consistent_complexes[int(n)]
                 space.tofile(directory(fname.format(n)))
 
         # Write out interaction analysis
@@ -484,11 +483,18 @@ def main():
     logger.info("Starting search.")
     if args.nprocessors <= 1:
         disvis = DisVis(receptor, ligand, restraints, options)
+        line = '{n} / {total}  time passed: {passed:.0f}s  eta: {eta:.0f}s       \r'
+        print_progress = args.verbose and sys.stdout.isatty()
         for n, (rotmat, weight) in enumerate(izip(rotations, weights)):
-            if args.verbose:
-                sys.stdout.write('{:>6d} {:>6d}\r'.format(n, nrot))
-                sys.stdout.flush()
             disvis(rotmat, weight=weight)
+            if print_progress:
+                percentage = (n + 1) / float(nrot) * 100
+                time_passed = time.time() - time0
+                eta = (time_passed) / percentage * (100 - percentage)
+                sys.stdout.write(line.format(n=n, total=nrot, passed=time_passed, eta=eta))
+                sys.stdout.flush()
+        if print_progress:
+            sys.stdout.write('\n')
     else:
         disvis = MPDisVis(receptor, ligand, restraints, options, rotations, weights)
         disvis.run()

@@ -1,10 +1,12 @@
-"""Extract ligand translations and rotations consistent with a specified number
-of restraints."""
+"""
+Extract ligand translations and rotations consistent with a specified number
+of restraints.
+"""
 
 from __future__ import division
 
 from argparse import ArgumentParser
-from os.path import abspath, getsize, join, splitext
+from os.path import abspath, join, splitext
 from glob import glob
 from sys import exit
 import operator
@@ -37,20 +39,15 @@ def parse_args():
 
 
 def main():
-    """Main function that will perform the function of the script."""
 
     args = parse_args()
 
-    interspace_files = glob(join(args.input, 'ais_*.mrc'))
-    nrot = len(interspace_files)
+    ais_fnames = glob(join(args.input, 'ais*.mrc'))
+    nrot = len(ais_fnames)
     if nrot == 0:
-        raise ValueError("No input files where found to generate complexes.")
-
+        raise ValueError("No input files where found in specified directory")
     quats = proportional_orientations(nrot, metric='number')[0]
-    nrot_per_job = len(glob(join(args.input, 'red_interspace_0_*.mrc')))
-    fn_out = join(args.output,
-                  'consistent_moves_{:d}.txt'.format(args.consistent_restraints)
-                  )
+    nrot_per_job = len(glob(join(args.input, 'ais_0_*.mrc')))
     mkdir_p(args.output)
 
     print 'Analyzing data ...'
@@ -59,18 +56,19 @@ def main():
     l_operator = operator.ge
     if args.exact:
         l_operator = operator.eq
+    fn_out = join(
+        args.output, 'consistent_moves_{:d}.txt'
+    ).format(args.consistent_restraints)
     with open(fn_out, 'w') as f:
         # Write nsol x y z q0 q1 q2 q3
         line = '{:d}' + ' {:.2f} ' * 3 + ' {:6.4f}' * 4 + '\n'
-        for fn in interspace_files:
-            # job, ind = [int(x) for x in splitext(fn)[0].split('_')[2:]]
-            ind = int(splitext(fn)[0].split('_')[1])
-            job = 0
+        for ais_fname in ais_fnames:
+            job, ind = [int(x) for x in splitext(ais_fname)[0].split('_')[1:]]
             quat = quats[ind + job * nrot_per_job]
-            vol = Volume.fromfile(fn)
-            trans = np.asarray(
-                l_operator(vol.array, args.consistent_restraints).nonzero()[::-1]).T \
-                    * vol.voxelspacing + vol.origin
+            ais = Volume.fromfile(ais_fname)
+            trans = (np.asarray(
+                l_operator(ais.array, args.consistent_restraints).nonzero()[::-1]).T
+                    * ais.voxelspacing + ais.origin)
             for t in trans:
                 data = [n] + list(t) + list(quat)
                 f.write(line.format(*data))
