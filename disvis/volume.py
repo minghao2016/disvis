@@ -7,6 +7,7 @@ from ._extensions import dilate_points
 
 
 class Volume(object):
+
     @classmethod
     def fromfile(cls, fid):
         array, voxelspacing, origin = parse_mrc(fid)
@@ -64,7 +65,7 @@ class Volumizer(object):
                        longest_distance - interaction_radius)
         top_right = (receptor.coor.max(axis=0) +
                      longest_distance + interaction_radius)
-        self.shape = [closest_multiple(int(np.ceil(x)))
+        self.shape = [self.closest_multiple(int(np.ceil(x)))
                       for x in (top_right - bottom_left)[::-1] / self.voxelspacing]
         self.origin = bottom_left
 
@@ -86,22 +87,22 @@ class Volumizer(object):
     def generate_lcore(self, rotmat):
         self.lcore.array.fill(0)
         np.dot(rotmat, self._ligand_coor_grid, out=self._ligand_coor_grid_rot)
-        dilate_points(self._ligand_coor_grid_rot, self._ligand_radii, 1,
+        dilate_points(self._ligand_coor_grid_rot, self._ligand_radii, 1.0,
                       self.lcore.array)
 
-
-def closest_multiple(ninit, multiples=(2, 3, 5, 7)):
-    while True:
-        n = ninit
-        divided = True
-        while divided:
-            divided = False
-            for radix in multiples:
-                quot, rem = divmod(n, radix)
-                if not rem:
-                    n = quot
-                    divided = True
-        if n != 1:
-            ninit += 1
-        else:
-            return ninit
+    @staticmethod
+    def closest_multiple(ninit, multiples=(2, 3, 5, 7)):
+        while True:
+            n = ninit
+            divided = True
+            while divided:
+                divided = False
+                for radix in multiples:
+                    quot, rem = divmod(n, radix)
+                    if not rem:
+                        n = quot
+                        divided = True
+            if n != 1:
+                ninit += 1
+            else:
+                return ninit
