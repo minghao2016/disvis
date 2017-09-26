@@ -15,7 +15,8 @@ import numpy as np
 from .pdb import PDB
 from .volume import Volume, Volumizer
 from .spaces import (InteractionSpace, RestraintSpace, Restraint,
-                     AccessibleInteractionSpace, OccupancySpace, InteractionAnalyzer)
+                     AccessibleInteractionSpace, OccupancySpace,
+                     InterfaceResidueIdentifyer, InteractionAnalyzer)
 from .helpers import RestraintParser, DJoiner
 from .rotations import proportional_orientations, quat_to_rotmat
 
@@ -121,8 +122,14 @@ class DisVis(object):
             self._occupancy_space = OccupancySpace(self._ais_calc)
 
         if self.options.interaction_analysis:
+            space = Volume.zeros_like(rcore)
+            identifyer = InterfaceResidueIdentifyer(space)
+            pruned_receptor = identifyer(self.receptor)
+            pruned_receptor.tofile('pruned_receptor.pdb')
+            pruned_ligand = identifyer(self.ligand)
+            pruned_ligand.tofile('pruned_ligand.pdb')
             self._interaction_analyzer = InteractionAnalyzer(
-                self.receptor, self.ligand, self._ais_calc, self._volumizer
+                pruned_receptor, pruned_ligand, self._ais_calc,
             )
         self._initialized = True
 
@@ -283,15 +290,17 @@ class MPDisVis(object):
         for n in xrange(self.options.nprocessors):
             fname = directory('_consistent_complexes_{}.txt'.format(n))
             self.consistent_complexes += np.loadtxt(fname, usecols=1)
+
             fname = directory('_violation_matrix_{}.txt'.format(n))
             self.violation_matrix += np.loadtxt(fname)
+
             fname = directory('_consistent_space_{}.mrc'.format(n))
             max_consistent = Volume.fromfile(fname)
             try:
                 np.maximum(self.max_consistent, max_consistent, self.max_consistent)
             except:
                 self.max_consistent = max_consistent
-            # TODO restraint correlations
+
             fname = directory("_restraint_correlations_{}.txt".format(n))
             with open(fname) as f:
                 for line in f:
@@ -370,6 +379,7 @@ class MPDisVis(object):
                 sys.stdout.write(line.format(n=n, total=nrots, passed=time_passed, eta=eta))
                 sys.stdout.flush()
                 if n >= nrots:
+                    sys.stdout.write('\n')
                     break
                 time.sleep(0.5)
 

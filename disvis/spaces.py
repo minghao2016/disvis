@@ -10,8 +10,9 @@ try:
 except ImportError:
     PYFFTW = False
 
+from .pdb import PDB
 from .volume import Volume
-from ._extensions import fill_restraint_space, count_interactions
+from ._extensions import fill_restraint_space, count_interactions, dilate_points
 
 
 class InteractionSpace(object):
@@ -200,19 +201,48 @@ class AccessibleInteractionSpace(object):
         return out
 
 
+class InterfaceResidueIdentifyer(object):
+
+    def __init__(self, space):
+        self.space = space
+        self._sub_space = Volume.zeros_like(space)
+
+    def __call__(self, structure, interaction_radius=10, atom_names=['CA', 'O3']):
+
+        interaction_radius = interaction_radius / self.space.voxelspacing
+        voxel_volume = self.space.voxelspacing ** 3
+        # Loop over each atom in the structure and check whether it can make
+        # significant interactions
+        # Make an inverted shape of the structure
+        self.space.array.fill(1)
+        grid_coor = structure.coor / self.space.voxelspacing
+        radii = structure.vdw_radius * (2.0 / self.space.voxelspacing)
+        dilate_points(grid_coor.T, radii, 0.0, self.space.array)
+        max_interaction_volume = 4 / 3. * np.pi * (interaction_radius ** 3 - radii.min() ** 3)
+        cutoff = 0.10 * max_interaction_volume
+
+        if atom_names:
+            structure = structure.select('name', atom_names)
+            grid_coor = structure.coor / self.space.voxelspacing
+        interface_indices = []
+        for n, coor in enumerate(grid_coor):
+            coor = coor.reshape(3, 1)
+            dilate_points(coor, interaction_radius, 1.0, self._sub_space.array)
+            interacting_space = (self.space.array * self._sub_space.array).sum()
+            dilate_points(coor, interaction_radius, 0.0, self._sub_space.array)
+            if interacting_space > cutoff:
+                interface_indices.append(n)
+        pruned_structure = PDB(structure.data[interface_indices])
+        return pruned_structure
+
+
 class InteractionAnalyzer(object):
 
-    def __init__(self, receptor, ligand, accessible_interaction_space, volumizer,
-                 atom_names=['CA', 'O3'], interaction_radius=10):
-                 #atom_names=[], interaction_radius=5):
+    def __init__(self, receptor, ligand, accessible_interaction_space, interaction_radius=10):
 
         self.ais = accessible_interaction_space
-        if atom_names:
-            self.ligand = ligand.select('name', atom_names)
-            self.receptor = receptor.select('name', atom_names)
-        else:
-            self.ligand = ligand
-            self.receptor = receptor
+        self.ligand = ligand
+        self.receptor = receptor
 
         # Transform coordinates into grid coordinates
         self._ligand_coor = np.ascontiguousarray(
@@ -222,17 +252,32 @@ class InteractionAnalyzer(object):
             (self.receptor.coor - self.ais.space.origin) / self.ais.space.voxelspacing
         )
 
-        # TODO
-        # Determine which atoms/residues need to be taken into account during
-        # interaction analysis. Use the shape of the receptor and ligand to see
-        # if the interaction radius is long enough to reach the surface.
-
         # Create distance restraints between each each residue of the ligand
         # and all of the receptor and each residue of the receptor with all of
         # the ligand. The distance restraints need to have views on the ligand
         # and receptor coordinate for efficiency.
         self._restraints_ligand = []
         self._restraints_receptor = []
+        max_dis = interaction_radius / self.ais.space.voxelspacing
+
+        # Build up the restraints for each receptor residue
+        residue_ids = ['-'.join([c, str(resi)]) for c, resi in
+                       izip(self.receptor.data['chain'], self.receptor.data['resi'])]
+        unique_residues, unique_indices = np.unique(residue_ids, return_index=True)
+        # Keep order
+        order = np.argsort(unique_indices)
+        unique_residues = unique_residues[order]
+        unique_indices = unique_indices[order]
+        unique_indices = unique_indices.tolist() + [None]
+        self._receptor_residues = unique_residues
+        self._receptor_interactions = np.zeros(
+            (self.ais.nrestraints, unique_residues.size), dtype=np.float32
+        )
+        for start, end in izip(unique_indices[:-1], unique_indices[1:]):
+            coor = self._receptor_coor[start:end]
+            restraint = Restraint(coor, self._ligand_coor_rot, 0, max_dis)
+            self._restraints_receptor.append(restraint)
+
         # Build up the restraints for each ligand residue
         residue_ids = ['-'.join([c, str(resi)]) for c, resi in
                        izip(self.ligand.data['chain'], self.ligand.data['resi'])]
@@ -246,27 +291,12 @@ class InteractionAnalyzer(object):
             (self.ais.nrestraints, unique_residues.size), dtype=np.float32
         )
         self._ligand_residues = unique_residues
-        max_dis = interaction_radius / self.ais.space.voxelspacing
         for start, end in izip(unique_indices[:-1], unique_indices[1:]):
             coor = self._ligand_coor_rot[start:end]
             restraint = Restraint(self._receptor_coor, coor, 0, max_dis)
             self._restraints_ligand.append(restraint)
-        # Build up the restraints for each receptor residue
-        residue_ids = ['-'.join([c, str(resi)]) for c, resi in
-                       izip(self.receptor.data['chain'], self.receptor.data['resi'])]
-        # Keep order
-        unique_residues, unique_indices = np.unique(residue_ids, return_index=True)
-        order = np.argsort(unique_indices)
-        unique_residues = unique_residues[order]
-        unique_indices = unique_indices[order]
-        unique_indices = unique_indices.tolist() + [None]
-        self._receptor_residues = unique_residues
-        self._receptor_interactions = np.zeros((self.ais.nrestraints, unique_residues.size),
-                                               dtype=np.float32)
-        for start, end in izip(unique_indices[:-1], unique_indices[1:]):
-            coor = self._receptor_coor[start:end]
-            restraint = Restraint(coor, self._ligand_coor_rot, 0, max_dis)
-            self._restraints_receptor.append(restraint)
+
+        # Array used for intermediate counting later on
         self._counter = np.zeros(self.ais.nrestraints, dtype=np.int32)
 
     def __call__(self, rotmat, weight=1):
